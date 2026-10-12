@@ -11,7 +11,7 @@ export type ReviewFilters = {
 export type EntryPatch = Partial<
   Pick<Entry, 'clientId' | 'billable' | 'reviewed'>
 >;
-export type UndoRecord = { before: Data; ids: string[] };
+export type UndoRecord = { before: Entry[]; after: Entry[] };
 
 export function selectWeek(entries: Entry[], week: string) {
   return entries.filter(
@@ -91,11 +91,39 @@ export function updateEntries(
     entries: data.entries.map((entry) => {
       if (!selected.has(entry.id)) return entry;
       const merged = { ...entry, ...patch };
+      // A meaningful correction needs a fresh review unless the patch sets it.
+      if (
+        patch.reviewed === undefined &&
+        (merged.clientId !== entry.clientId ||
+          merged.billable !== entry.billable)
+      )
+        merged.reviewed = false;
       validateEntry(merged, data.clients);
       return merged;
     }),
   };
 }
-export function undoEntries(operation: UndoRecord): Data {
-  return operation.before;
+export function undoRecord(
+  before: Data,
+  after: Data,
+  ids: string[],
+): UndoRecord {
+  const pick = (data: Data) =>
+    data.entries.filter((entry) => ids.includes(entry.id));
+  return { before: pick(before), after: pick(after) };
+}
+export function undoEntries(data: Data, operation: UndoRecord): Data {
+  const changedSince = operation.after.some((expected) => {
+    const current = data.entries.find((e) => e.id === expected.id);
+    return !current || JSON.stringify(current) !== JSON.stringify(expected);
+  });
+  if (changedSince)
+    throw new Error(
+      'Cannot undo: one of those entries was changed or removed after the action. Review it manually.',
+    );
+  const restore = new Map(operation.before.map((e) => [e.id, e]));
+  return {
+    ...data,
+    entries: data.entries.map((e) => restore.get(e.id) ?? e),
+  };
 }

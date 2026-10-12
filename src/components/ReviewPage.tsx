@@ -22,8 +22,8 @@ import {
 } from '../model';
 import {
   selectReview,
-  selectWeek,
   undoEntries,
+  undoRecord,
   updateEntries,
 } from '../review';
 import type { EntryPatch, UndoRecord } from '../review';
@@ -57,7 +57,6 @@ export function ReviewPage({
   const [operation, setOperation] = useState<UndoRecord | null>(null);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const weekEntries = selectWeek(data.entries, week);
   const visible = selectReview(data.entries, data.clients, {
     week,
     clientId,
@@ -65,22 +64,27 @@ export function ReviewPage({
     status,
     search,
   });
-  const summaryEntries = weekEntries;
-  const exportEntries = weekEntries;
+  const summaryEntries = visible;
+  const exportEntries = visible;
   const summary = totals(summaryEntries);
+  const pendingCount = visible.filter((e) => !e.reviewed).length;
   const selectedIds = selected.filter((id) =>
     data.entries.some((e) => e.id === id),
   );
   const employees = [...new Set(data.entries.map((e) => e.employee))].sort();
   function changeView(update: () => void) {
     update();
+    if (selectedIds.length) {
+      setSelected([]);
+      setMessage('Selection cleared because the view changed.');
+    }
   }
   function apply(ids: string[], patch: EntryPatch) {
     setError('');
     try {
       const next = updateEntries(data, ids, patch);
       save(next);
-      setOperation({ before: data, ids });
+      setOperation(undoRecord(data, next, ids));
       setSelected([]);
       setMessage(
         `Updated ${ids.length} ${ids.length === 1 ? 'entry' : 'entries'}.`,
@@ -163,6 +167,23 @@ export function ReviewPage({
           <strong>
             {visible.filter((e) => e.reviewed).length} / {visible.length}
           </strong>
+          {status === 'pending' ? (
+            <button
+              className="text-button"
+              onClick={() => changeView(() => setStatus('all'))}
+            >
+              Show all review states
+            </button>
+          ) : (
+            pendingCount > 0 && (
+              <button
+                className="text-button"
+                onClick={() => changeView(() => setStatus('pending'))}
+              >
+                Show {pendingCount} left to check
+              </button>
+            )
+          )}
         </div>
       </div>
       <div className="entries-panel">
@@ -284,7 +305,7 @@ export function ReviewPage({
               disabled={readOnly}
               onClick={() => {
                 try {
-                  save(undoEntries(operation));
+                  save(undoEntries(data, operation));
                   setOperation(null);
                   setError('');
                   setMessage('Last review action undone.');
